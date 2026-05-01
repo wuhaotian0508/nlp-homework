@@ -1,0 +1,13 @@
+{
+  "dataset": "pg19_single_sample",
+  "model": "EleutherAI/pythia-70m",
+  "max_length": 2048,
+  "num_chunks": 1,
+  "baseline_ppl": 28.208354869271222,
+  "snapkv_ppl": 44.96916830156017,
+  "max_capacity": 768,
+  "observation_window": 64,
+  "full_kv_cache_mb": 12.0,
+  "compressed_kv_cache_mb": 9.75,
+  "compression_ratio": 0.8125
+}

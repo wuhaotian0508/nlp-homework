@@ -1,0 +1,11 @@
+{
+  "method": "dense_baseline",
+  "model": "EleutherAI/pythia-70m",
+  "dataset": "wikitext",
+  "max_length": 2048,
+  "ppl": 44.96727714791801,
+  "ttft_ms": 51.73353334733596,
+  "tpot_ms": 7.4274115485329855,
+  "throughput_tok_per_sec": 134.63640643388254,
+  "kv_cache_memory_mb": 3.0
+}

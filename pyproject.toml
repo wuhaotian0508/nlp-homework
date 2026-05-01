@@ -1,0 +1,30 @@
+[project]
+name = "efficient-inference"
+version = "0.1.0"
+description = "Language Model Efficient Inference - KV Cache Compression with SnapKV"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "torch>=2.5.0",
+    "transformers>=4.36.0",
+    "datasets>=2.14.0",
+    "accelerate>=0.24.0",
+    "tqdm",
+    "matplotlib",
+    "pandas",
+    "httpx[socks]>=0.28.1",
+    "ipykernel>=7.2.0",
+    "packaging>=26.1",
+]
+
+[[tool.uv.index]]
+name = "pytorch-cu124"
+url = "https://download.pytorch.org/whl/cu124"
+explicit = true
+
+[tool.uv.sources]
+torch = { index = "pytorch-cu124" }
+
+[project.scripts]
+eval-baseline = "scripts.eval_baseline:main"
+eval-snapkv = "scripts.eval_snapkv:main"

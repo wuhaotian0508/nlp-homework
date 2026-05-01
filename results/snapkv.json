@@ -1,0 +1,13 @@
+{
+  "method": "snapkv",
+  "model": "EleutherAI/pythia-70m",
+  "dataset": "wikitext",
+  "max_length": 2048,
+  "max_capacity": 512,
+  "observation_window": 32,
+  "kernel_size": 5,
+  "ppl": 134.23281628595004,
+  "kv_cache_memory_mb": 3.0,
+  "full_kv_cache_memory_mb": 3.0,
+  "compression_ratio": 1.0
+}
