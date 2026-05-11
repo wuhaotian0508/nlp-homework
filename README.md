@@ -35,6 +35,16 @@ uv run python scripts/eval_snapkv.py --dataset wikitext --max_length 2048 --max_
 # PG-19 single sample (included in eval_pg19_single.py)
 ```
 
+### 3. Speed and FLOPs benchmark
+
+```bash
+uv run python scripts/benchmark_inference.py \
+    --prompt_length 1024 \
+    --gen_length 128 \
+    --max_capacity 768 \
+    --observation_window 64
+```
+
 ### Key Parameters
 
 | Parameter | Default | Description |
@@ -64,6 +74,21 @@ uv run python scripts/eval_snapkv.py --dataset wikitext --max_length 2048 --max_
 | Dense (baseline) | 28.21 | 12.00 | 100% | - |
 | SnapKV (k=768) | 44.97 | 9.75 | **81.2%** | 1.59x |
 
+### Inference Acceleration Metrics
+
+**实验配置**: Pythia-70M, WikiText prompt length 1024, generation length 128, RTX 4060 Laptop GPU, 3 runs after warmup
+
+| Method | TTFT (ms) ↓ | TPOT (ms) ↓ | Throughput (tok/s) ↑ | Total GFLOPs ↓ | Avg GFLOPs / output token ↓ |
+|--------|-------------|-------------|----------------------|----------------|-----------------------------|
+| Dense (baseline) | 22.76 | 4.94 | 202.53 | 117.42 | 0.917 |
+| SnapKV (k=768) | 21.95 | 4.71 | 212.18 | 117.12 | 0.915 |
+
+**说明**:
+- TTFT: Time To First Token; SnapKV 的 TTFT 包含 prefill、注意力导出和 KV 压缩开销
+- TPOT: Time Per Output Token; SnapKV decode 使用压缩后的 832-token KV cache，Dense 使用 1024-token KV cache
+- Throughput = 1 / TPOT
+- FLOPs 为模型矩阵乘理论估算，包含 Transformer 层和 lm_head，不包含采样、top-k 选择、cache 移动等非矩阵乘开销
+
 ### 优化效果总结
 
 **第一问（Baseline）**：
@@ -75,6 +100,8 @@ uv run python scripts/eval_snapkv.py --dataset wikitext --max_length 2048 --max_
 - 内存节省 **18.8%**
 - WikiText PPL: 39.67 → 59.00 (1.49x 退化)
 - PG-19 PPL: 28.21 → 44.97 (1.59x 退化)
+- 推理速度: TPOT 4.94 ms → 4.71 ms，Throughput 202.53 tok/s → 212.18 tok/s
+- FLOPs: Total 117.42 GFLOPs → 117.12 GFLOPs；Decode FLOPs 节省约 2.3%
 
 **参数调优说明**：
 - 初始参数 (k=128, window=32) 压缩过于激进，导致 PPL 退化 13x+
@@ -113,9 +140,9 @@ efficient-inference/
 │   ├── evaluate.py          # PPL & speed measurement utilities
 │   └── snapkv.py            # SnapKV implementation
 ├── scripts/
-│   ├── eval_baseline.py     # Baseline experiments (full sequence)
 │   ├── eval_baseline_fair.py # Baseline with split-half (fair comparison)
 │   ├── eval_snapkv.py       # SnapKV experiments
+│   ├── benchmark_inference.py # TTFT, TPOT, Throughput, FLOPs benchmark
 │   └── eval_pg19_single.py  # PG-19 single sample evaluation
 ├── results/                 # Experiment output (JSON)
 ├── pyproject.toml

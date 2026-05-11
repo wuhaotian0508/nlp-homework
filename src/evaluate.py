@@ -8,6 +8,24 @@ import numpy as np
 from tqdm import tqdm  # 进度条库
 
 
+def _is_cuda_device(device):
+    return str(device).startswith("cuda") and torch.cuda.is_available()
+
+
+def _iter_cache_layers(past_key_values):
+    """Support both legacy tuple caches and transformers DynamicCache."""
+    if hasattr(past_key_values, "layers"):
+        for layer in past_key_values.layers:
+            yield layer.keys, layer.values
+        return
+    if hasattr(past_key_values, "to_legacy_cache"):
+        for layer_kv in past_key_values.to_legacy_cache():
+            yield layer_kv[0], layer_kv[1]
+        return
+    for layer_kv in past_key_values:
+        yield layer_kv[0], layer_kv[1]
+
+
 @torch.no_grad()  # 禁用梯度计算，节省内存和加速推理
 def evaluate_ppl(model, data_chunks, device="cuda", desc="Evaluating PPL"):
     """
@@ -124,7 +142,7 @@ def measure_generation_time(model, input_ids, gen_length=128, device="cuda", num
         # 如果在 GPU 上，先同步确保之前的操作完成
         # GPU 操作是异步的，torch.cuda.synchronize() 会等待所有 GPU 操作完成
         # 不同步的话，计时可能不准确
-        if device == "cuda":
+        if _is_cuda_device(device):
             torch.cuda.synchronize()
 
         # ====================================================================
@@ -148,7 +166,7 @@ def measure_generation_time(model, input_ids, gen_length=128, device="cuda", num
         next_token = logits[:, -1, :].argmax(dim=-1, keepdim=True)
         # next_token 形状: [1, 1]，表示 1 个生成的 token
 
-        if device == "cuda":
+        if _is_cuda_device(device):
             torch.cuda.synchronize()  # 等待 GPU 计算完成再计时
         ttft = time.perf_counter() - start  # 计算 TTFT（单位：秒）
         ttft_list.append(ttft)
@@ -171,7 +189,7 @@ def measure_generation_time(model, input_ids, gen_length=128, device="cuda", num
             next_token = outputs.logits[:, -1, :].argmax(dim=-1, keepdim=True)  # 贪心解码
             generated_tokens.append(next_token)
 
-        if device == "cuda":
+        if _is_cuda_device(device):
             torch.cuda.synchronize()
         decode_time = time.perf_counter() - start
         # TPOT = 总解码时间 / 生成的 token 数
@@ -235,8 +253,7 @@ def measure_kv_cache_memory(past_key_values):
     total_elements = 0  # 累计所有 KV 张量的元素总数
 
     # 遍历每一层的 KV Cache
-    for layer_kv in past_key_values:
-        k, v = layer_kv[0], layer_kv[1]  # 分别取出该层的 Key 和 Value
+    for k, v in _iter_cache_layers(past_key_values):
         # numel() 返回张量中的元素总数
         # 例如：形状 [1, 8, 2048, 8] 的张量有 1*8*2048*8 = 131,072 个元素
         total_elements += k.numel() + v.numel()
@@ -250,4 +267,105 @@ def measure_kv_cache_memory(past_key_values):
     return {
         "total_elements": total_elements,  # 总元素数
         "memory_mb": memory_mb,            # 内存占用（MB）
+    }
+
+
+@torch.no_grad()
+def measure_snapkv_generation_time(model, input_ids, compressor, gen_length=128, device="cuda", num_runs=3):
+    """Measure SnapKV TTFT, TPOT, and throughput.
+
+    TTFT includes prefill, attention export, and KV compression overhead.
+    """
+    from src.snapkv import apply_snapkv
+
+    model.eval()
+    input_ids = input_ids.to(device)
+    ttft_list = []
+    tpot_list = []
+
+    for _ in range(num_runs):
+        if _is_cuda_device(device):
+            torch.cuda.synchronize()
+
+        start = time.perf_counter()
+        past_kv, logits = apply_snapkv(model, input_ids, compressor, device=device)
+        next_token = logits[:, -1, :].argmax(dim=-1, keepdim=True)
+
+        if _is_cuda_device(device):
+            torch.cuda.synchronize()
+        ttft_list.append(time.perf_counter() - start)
+
+        start = time.perf_counter()
+        for _ in range(gen_length - 1):
+            outputs = model(input_ids=next_token, past_key_values=past_kv, use_cache=True)
+            past_kv = outputs.past_key_values
+            next_token = outputs.logits[:, -1, :].argmax(dim=-1, keepdim=True)
+
+        if _is_cuda_device(device):
+            torch.cuda.synchronize()
+        decode_time = time.perf_counter() - start
+        tpot_list.append(decode_time / (gen_length - 1) if gen_length > 1 else 0)
+
+    avg_ttft = np.mean(ttft_list)
+    avg_tpot = np.mean(tpot_list)
+    return {
+        "ttft_ms": avg_ttft * 1000,
+        "tpot_ms": avg_tpot * 1000,
+        "throughput_tok_per_sec": 1.0 / avg_tpot if avg_tpot > 0 else 0,
+    }
+
+
+def get_cache_sequence_length(past_key_values):
+    """Return the sequence length stored in a KV cache."""
+    if hasattr(past_key_values, "get_seq_length"):
+        try:
+            return int(past_key_values.get_seq_length())
+        except TypeError:
+            return int(past_key_values.get_seq_length(0))
+    for k, _ in _iter_cache_layers(past_key_values):
+        return int(k.shape[-2])
+    return 0
+
+
+def estimate_generation_flops(config, prompt_length, gen_length=128, decode_cache_length=None):
+    """
+    Estimate FLOPs for one prompt prefill plus autoregressive generation.
+
+    This includes Transformer QKV/output projections, attention (QK and AV),
+    MLP, and lm_head matmuls. It excludes sampling, top-k indexing, cache
+    movement, and other non-matmul overhead.
+    """
+    hidden_size = int(getattr(config, "hidden_size"))
+    num_layers = int(getattr(config, "num_hidden_layers", getattr(config, "n_layer", 0)))
+    intermediate_size = int(getattr(config, "intermediate_size", 4 * hidden_size))
+    vocab_size = int(getattr(config, "vocab_size"))
+    prompt_length = int(prompt_length)
+    gen_length = int(gen_length)
+    decode_cache_length = prompt_length if decode_cache_length is None else int(decode_cache_length)
+
+    def layer_flops(seq_len, context_len):
+        # Count multiply-add as 2 FLOPs.
+        qkv_and_out = 8 * seq_len * hidden_size * hidden_size
+        mlp = 4 * seq_len * hidden_size * intermediate_size
+        attention = 4 * seq_len * context_len * hidden_size
+        return num_layers * (qkv_and_out + mlp + attention)
+
+    prefill_flops = layer_flops(prompt_length, prompt_length) + 2 * prompt_length * hidden_size * vocab_size
+
+    decode_flops = 0
+    for step in range(gen_length):
+        context_len = decode_cache_length + step + 1
+        decode_flops += layer_flops(1, context_len) + 2 * hidden_size * vocab_size
+
+    total_flops = prefill_flops + decode_flops
+    return {
+        "prompt_length": prompt_length,
+        "gen_length": gen_length,
+        "decode_cache_length": decode_cache_length,
+        "prefill_flops": float(prefill_flops),
+        "decode_flops": float(decode_flops),
+        "total_flops": float(total_flops),
+        "avg_flops_per_output_token": float(total_flops / gen_length) if gen_length else 0.0,
+        "total_gflops": float(total_flops / 1e9),
+        "avg_gflops_per_output_token": float(total_flops / gen_length / 1e9) if gen_length else 0.0,
     }

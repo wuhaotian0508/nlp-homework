@@ -1,0 +1,67 @@
+{
+  "model": "EleutherAI/pythia-70m",
+  "dataset": "wikitext",
+  "device": "cuda",
+  "gpu": "NVIDIA GeForce RTX 4060 Laptop GPU",
+  "max_length": 2048,
+  "prompt_length": 1024,
+  "gen_length": 128,
+  "num_runs": 3,
+  "warmup_runs": 1,
+  "snapkv_config": {
+    "max_capacity": 768,
+    "observation_window": 64,
+    "kernel_size": 5
+  },
+  "dense": {
+    "speed": {
+      "ttft_ms": 22.7618,
+      "tpot_ms": 4.937626,
+      "throughput_tok_per_sec": 202.526467
+    },
+    "kv_cache_memory_mb": 12.0,
+    "cache_length": 1024,
+    "flops": {
+      "prompt_length": 1024,
+      "gen_length": 128,
+      "decode_cache_length": 1024,
+      "prefill_flops": 104287174656.0,
+      "decode_flops": 13137346560.0,
+      "total_flops": 117424521216.0,
+      "avg_flops_per_output_token": 917379072.0,
+      "total_gflops": 117.424521,
+      "avg_gflops_per_output_token": 0.917379
+    }
+  },
+  "snapkv": {
+    "speed": {
+      "ttft_ms": 21.947767,
+      "tpot_ms": 4.712897,
+      "throughput_tok_per_sec": 212.183699
+    },
+    "kv_cache_memory_mb": 9.75,
+    "cache_length": 832,
+    "flops": {
+      "prompt_length": 1024,
+      "gen_length": 128,
+      "decode_cache_length": 832,
+      "prefill_flops": 104287174656.0,
+      "decode_flops": 12835356672.0,
+      "total_flops": 117122531328.0,
+      "avg_flops_per_output_token": 915019776.0,
+      "total_gflops": 117.122531,
+      "avg_gflops_per_output_token": 0.91502
+    }
+  },
+  "comparison": {
+    "ttft_ratio_dense_over_snapkv": 1.03709,
+    "tpot_speedup_dense_over_snapkv": 1.047684,
+    "throughput_speedup_snapkv_over_dense": 1.047684,
+    "kv_memory_ratio": 0.8125,
+    "kv_memory_saving": 0.1875,
+    "decode_flops_ratio": 0.977013,
+    "decode_flops_saving": 0.022987,
+    "total_flops_ratio": 0.997428
+  },
+  "flops_note": "Estimated model matmul FLOPs; excludes sampling, top-k selection, cache movement, and SnapKV compression bookkeeping."
+}

@@ -26,5 +26,6 @@ explicit = true
 torch = { index = "pytorch-cu124" }
 
 [project.scripts]
-eval-baseline = "scripts.eval_baseline:main"
+eval-baseline = "scripts.eval_baseline_fair:main"
 eval-snapkv = "scripts.eval_snapkv:main"
+benchmark-inference = "scripts.benchmark_inference:main"
